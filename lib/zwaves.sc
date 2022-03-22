@@ -58,7 +58,7 @@ Zwaves {
 					{ arg amp=0;
 						Out.ar(busses[\voice_in][dst].index,
 							InFeedback.ar(busses[\voice_out][src].index, 2) * amp.lag)
-					}.play(groups[\output])
+					}.play(groups[\input])
 				});
 			});
 		]);
@@ -82,23 +82,42 @@ Zwaves {
 	}
 
 	free {
-		// TODO. lol
+		// NB: don't need to free individual synths;
+		// freeing the groups takes care of it
+		groups[\input].free;
+		groups[\voice].free;
+		groups[\output].free;
+
+		patches[\voice_voice].do({ arg arr; arr.do ({ arg p; p.free; }) });
+		busses[\voice_input].do({ arg b; b.free; });
+		busses[\voice_output].do({ arg b; b.free; });
 	}
 
+	// populate a new, empty slot with a voice synthesis node
 	createVoiceSynth { arg slot, def, copySynth=nil;
-		var synth = Synth.newPaused(def, [
-			\in, busses[\voice_in][slot].index,
-			\out, busses[\voice_out][slot].index
-		], groups[\voice], \addToTail);
-		var id = synth.nodeID;
-		voiceNodeIds[slot] = id;
-		voiceSynths[id] = synth;
-		if (copySynth.notNil, {
-			// TODO: copy existing synth params
-		});
-		synth.run(true);
+		Routine {
+			var synth = Synth.newPaused(def, [
+				\in, busses[\voice_in][slot].index,
+				\out, busses[\voice_out][slot].index
+			], groups[\voice], \addToTail);
+			var id = synth.nodeID;
+			voiceNodeIds[slot] = id;
+			voiceSynths[id] = synth;
+
+			if (copySynth.notNil, {
+				[\hz, \mod1, \mod2, \mod3].do({ arg k;
+					copySynth.get(k, { arg val;
+						synth.set(k, val);
+					});
+				});
+				server.sync;
+			});
+			synth.run(true);
+		}.play;
 	}
 
+	// set the voice definition for a slot
+	// replaces the existing synth assigned to that slot, if any
 	setVoiceDef { arg slot, def;
 		var id = voiceNodeIds[slot];
 		if(id.isNil, {
@@ -121,20 +140,42 @@ Zwaves {
 		});
 	}
 
-	openVoiceGate { arg slot;
-		var id = voiceNodeIds[slot];
+	// openVoiceGateBySlot {arg slot;
+	// 	var id = voiceNodeIds[slot];
+	// 	openVoiceGateById(id);
+	// }
+
+	openVoiceGateById { arg id;
 		voiceSynths[id].set(\gate, 1);
 		voiceSynths[id].run(true);
 		voiceNodeStatus[id] = \playing;
 	}
 
-	closeVoiceGate { arg slot;
+/*	closeVoiceGateBySlot { arg slot;
 		var id =voiceNodeIds[slot];
+		closeVoiceGateById(id);
+	}*/
+
+	closeVoiceGateById { arg id;
 		voiceSynths[id].set(\gate, 0);
 	}
 
-	//---------
-	//--- manage wave definitions
+	//-------------------------------------------------
+	//--- additional convenience setters
+
+	playVoice { arg slot, hz, level=1.0;
+		var id = voiceNodeIds[slot];
+		voiceSynths[id].set(\hz, hz, \level, level);
+		openVoiceGateById(id);
+	}
+
+	setVoiceParam { arg slot, key, value;
+		var id = voiceNodeIds[slot];
+		voiceSynths[id].set(key, value);
+	}
+
+	//-------------------------------------------------
+	//--- wave definition management
 
 	loadAllWaves { arg dir;
 		PathName.new(dir.asString.standardizePath).files.do{ arg f;
@@ -159,19 +200,19 @@ Zwaves {
 		postln("num args: " ++ nargs);
 		^switch(nargs,
 			{ 5 }, { this.wrapWave(name, fn) },
-			{ 9 }, { this.wrapWaveNoVca(name, fn) },
-			{ 11 }, { this.wrapWaveNoVcaNoMix(name, fn) }
+			{ 10 }, { this.wrapWaveNoVca(name, fn) },
+			{ 12 }, { this.wrapWaveNoVcaNoMix(name, fn) }
 		)
 	}
 
 	wrapWave { arg name, fn;
 		^SynthDef.new(name.asSymbol, {
-			arg out=0, in, gate, hz,
+			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
 			mod1=0, mod2=0, mod3=0;
 			var aenv, snd;
-			aenv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate);
+			aenv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
 			snd = fn.value(hz, in, mod1, mod2, mod3) * aenv;
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
 		})
@@ -179,24 +220,24 @@ Zwaves {
 
 	wrapWaveNoVca { arg name, fn;
 		^SynthDef.new(name.asSymbol, {
-			arg out=0, in, gate, hz,
+			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
 			mod1=0, mod2=0, mod3=0;
 			var snd;
-			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate);
+			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, doneAction);
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
 		})
 	}
 
 	wrapWaveNoVcaNoMix { arg name, fn;
 		^SynthDef.new(name.asSymbol, {
-			arg out=0, in, gate, hz,
+			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
 			mod1=0, mod2=0, mod3=0;
 			var snd;
-			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, level, pan);
+			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, doneAction, level, pan);
 			Out.ar(out, snd);
 		})
 	}

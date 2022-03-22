@@ -8,5 +8,4 @@
 	snd = SinOscFB.ar(hz, sine_fb) * AmpCompA.kr(hz);
 	snd = SelectX.ar(ring_mix, [snd, snd * LPF.ar(In.ar(in), ring_lpf_fc)]);
 	snd
-
 }
