@@ -1,6 +1,6 @@
 
 Zwaves {
-
+	var server;
 	var numVoices;
 	var defs;
 	var groups;
@@ -10,99 +10,104 @@ Zwaves {
 	var outputs;
 	var patches;
 
-	var responders;
-	var registered;
-	var nodeEndCallbacks;
+	var voiceSynths;
+	var voiceNodeIds;
+	var voiceNodeStatus;
 
-	*new { arg aNumVoices = 16, server;
-		^super.new.init(aNumVoices);
+	var nodeOffResponder;
+
+	*new { arg aNumVoices = 16, aServer;
+		^super.new.init(aNumVoices, aServer);
 	}
 
-	init { arg aNumVoices, server;
+	init { arg aNumVoices, aServer;
+		server = aServer;
 		if (server.isNil, { server = Server.default; });
 		numVoices = aNumVoices;
+
+		// collection of synthdefs, indexed by name
 		defs = Dictionary.new;
+
+		// collection of groups, indexed by role
 		groups = Dictionary.with([
 			\voice, Group.new(server)
 		]);
+
+		// collection of bus arrays, indexed by role
 		busses= Dictionary.with([
 			\voice_in, Array.fill(numVoices, { Bus.audio(server, 1) }),
 			\voice_out, Array.fill(numVoices, { Bus.audio(server, 2) })
 		]);
-		voices = Dictionary.new;
-		inputs = Dictionary.new;
-		outputs = Dictionary.new;
-		registered = Dictionary.new;
-		nodeEndCallbacks = Dictionary.new;
 
-		responders = Dictionary.with([
-			\end, OSCFunc({ arg msg;
-				var id = msg[1];
-				if(registered[id].notNil, {
-					handleNodeEnd(id);
-				});
-			}, 'n_end', server.addr),
-			\off, OSCFunc({ arg msg;
-				var id = msg[1];
-				if(registered[id].notNil, {
-					handleNodeOff(id);
-				});
-			}, 'n_off', server.addr)
-		]);
+		// collection of Synths, indexed by node ID
+		voiceSynths = Dictionary.new;
+
+		// array of node IDs per voice slot
+		voiceNodeIds = Array.newClear(numVoices);
+
+		// collection of status keys, indexed by node ID
+		voiceNodeStatus = Dictionary.new;
+
+
+		nodeOffResponder = OSCFunc({ arg msg;
+			var id = msg[1];
+			if(voiceNodeStatus[id].notNil, {
+				voiceNodeStatus[id] = \paused;
+			});
+		}, 'n_off', server.addr);
 
 	}
 
-	handleNodeEnd { arg id;
-		var cb;
-		registered[id] = nil;
-		cb = nodeEndCallbacks[id];
-		if (cb.notNil, {
-			cb.value;
-			nodeEndCallbacks[id] = nil;
+	createVoiceSynth { arg slot, def, copySynth=nil;
+		var synth = Synth.newPaused(def, [
+			\in, busses[\voice_in][slot].index,
+			\out, busses[\voice_out][slot].index
+		], groups[\voice], \addToTail);
+		var id = synth.nodeID;
+		voiceNodeIds[slot] = id;
+		voiceSynths[id] = synth;
+		if (copySynth.notNil, {
+			// TODO: copy existing synth params
 		});
+		synth.run(true);
 	}
 
-	handleNodeOff { arg id;
-		registered[id] = \paused;
-	}
-
-	addVoice { arg slot, def;
-		if (voices[slot].isNil, {
-			voices[slot] = Synth.newPaused(def, [
-				\in, busses[\voice_in][slot].index,
-				\out, busses[\voice_out][slot].index
-			], groups[\voice], \addToTail);
-			registered[slot] = \paused
+	setVoiceDef { arg slot, def;
+		var id = voiceNodeIds[slot];
+		if(id.isNil, {
+			createVoiceSynth(slot, def);
 		}, {
 			// replace existing voice in slot
-			switch(registered[slot],
+			switch(voiceNodeStatus[id],
 				{\paused}, {
-					voices[slot].free;
-					voices[slot] = nil;
-					addVoice(slot, def);
+					voiceNodeIds[slot] = nil;
+					createVoiceSynth(slot, def, voiceSynths[id]);
 				},
 				{\playing}, {
-					nodeEndCallbacks[voices[slot].nodeID] = {
-						voices[slot].free;
-						voices[slot] = nil;
-						addVoice(slot, def);
-					};
-					voices[slot].set(\gate, 0);
+					voiceSynths[id].set(\doneAction, 2);
+					voiceSynths[id].set(\gate, 0);
+					voiceSynths[id] = nil;
+					voiceNodeIds[slot] = nil;
+					createVoiceSynth(slot, def, voiceSynths[id]);
 				}
 			);
 		});
 	}
 
 	openVoiceGate { arg slot;
-		voices[slot].set(\gate, 1);
-		voices[slot].run(true);
-		registered[slot] = \playing;
+		var id =voiceNodeIds[slot];
+		voiceSynths[id].set(\gate, 1);
+		voiceSynths[id].run(true);
+		voiceNodeStatus[id] = \playing;
 	}
 
 	closeVoiceGate { arg slot;
-		voices[slot].set(\gate, 0);
+		var id =voiceNodeIds[slot];
+		voiceSynths[id].set(\gate, 0);
 	}
 
+	//---------
+	//--- manage wave definitions
 
 	loadAllWaves { arg dir;
 		dir.filesDo { arg f; loadWave(f) }
