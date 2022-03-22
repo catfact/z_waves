@@ -1,20 +1,20 @@
 
 Zwaves {
-	var server;
-	var numVoices;
-	var defs;
-	var groups;
-	var busses;
-	var voices;
-	var inputs;
-	var outputs;
-	var patches;
+	var <server;
+	var <numVoices;
+	var <defs;
+	var <groups;
+	var <busses;
+	var <voices;
+	var <inputs;
+	var <outputs;
+	var <patches;
 
-	var voiceSynths;
-	var voiceNodeIds;
-	var voiceNodeStatus;
+	var <voiceSynths;
+	var <voiceNodeIds;
+	var <voiceNodeStatus;
 
-	var nodeOffResponder;
+	var <nodeOffResponder;
 
 	*new { arg aNumVoices = 16, aServer;
 		^super.new.init(aNumVoices, aServer);
@@ -29,14 +29,38 @@ Zwaves {
 		defs = Dictionary.new;
 
 		// collection of groups, indexed by role
-		groups = Dictionary.with([
-			\voice, Group.new(server)
+		groups = Dictionary.newFrom([
+			\input, Group.tail(server),
+			\voice, Group.tail(server),
+			\output, Group.tail(server)
 		]);
 
 		// collection of bus arrays, indexed by role
-		busses= Dictionary.with([
+		busses= Dictionary.newFrom([
 			\voice_in, Array.fill(numVoices, { Bus.audio(server, 1) }),
 			\voice_out, Array.fill(numVoices, { Bus.audio(server, 2) })
+		]);
+
+		// collection of patch point synth arrays, indexed by role
+		patches = Dictionary.newFrom([
+			\adc_voice, Array.fill(numVoices, { arg slot;
+				{ arg amp=1;
+					Out.ar(busses[\voice_in][slot].index, SoundIn.ar(0) * amp.lag)
+				}.play(groups[\input])
+			});
+			\voice_dac, Array.fill(numVoices, { arg slot;
+				{ arg amp=1;
+					Out.ar(0, In.ar(busses[\voice_out][slot].index, 2) * amp.lag)
+				}.play(groups[\output])
+			});
+			\voice_voice, Array.fill(numVoices, { arg src;
+				Array.fill(numVoices, { arg dst;
+					{ arg amp=0;
+						Out.ar(busses[\voice_in][dst].index,
+							InFeedback.ar(busses[\voice_out][src].index, 2) * amp.lag)
+					}.play(groups[\output])
+				});
+			});
 		]);
 
 		// collection of Synths, indexed by node ID
@@ -48,7 +72,6 @@ Zwaves {
 		// collection of status keys, indexed by node ID
 		voiceNodeStatus = Dictionary.new;
 
-
 		nodeOffResponder = OSCFunc({ arg msg;
 			var id = msg[1];
 			if(voiceNodeStatus[id].notNil, {
@@ -56,6 +79,10 @@ Zwaves {
 			});
 		}, 'n_off', server.addr);
 
+	}
+
+	free {
+		// TODO. lol
 	}
 
 	createVoiceSynth { arg slot, def, copySynth=nil;
@@ -75,27 +102,27 @@ Zwaves {
 	setVoiceDef { arg slot, def;
 		var id = voiceNodeIds[slot];
 		if(id.isNil, {
-			createVoiceSynth(slot, def);
+			this.createVoiceSynth(slot, def);
 		}, {
 			// replace existing voice in slot
 			switch(voiceNodeStatus[id],
 				{\paused}, {
 					voiceNodeIds[slot] = nil;
-					createVoiceSynth(slot, def, voiceSynths[id]);
+					this.createVoiceSynth(slot, def, voiceSynths[id]);
 				},
 				{\playing}, {
 					voiceSynths[id].set(\doneAction, 2);
 					voiceSynths[id].set(\gate, 0);
 					voiceSynths[id] = nil;
 					voiceNodeIds[slot] = nil;
-					createVoiceSynth(slot, def, voiceSynths[id]);
+					this.createVoiceSynth(slot, def, voiceSynths[id]);
 				}
 			);
 		});
 	}
 
 	openVoiceGate { arg slot;
-		var id =voiceNodeIds[slot];
+		var id = voiceNodeIds[slot];
 		voiceSynths[id].set(\gate, 1);
 		voiceSynths[id].run(true);
 		voiceNodeStatus[id] = \playing;
@@ -110,32 +137,39 @@ Zwaves {
 	//--- manage wave definitions
 
 	loadAllWaves { arg dir;
-		dir.filesDo { arg f; loadWave(f) }
+		PathName.new(dir.asString.standardizePath).files.do{ arg f;
+			this.loadWave(f)
+		}
 	}
 
 	loadWave { arg path;
 		var name, fn, def;
-		name = PathName(path).fileNameWithoutExtension;
-		fn = File.readAllString(path.asString.standardizePath).compile;
-		def = wrapWaveFunction(name, fn);
-		def.add(Server.default);
+		postln("loadwave: "++path);
+		name = path.fileNameWithoutExtension;
+		fn = File.readAllString(path.fullPath).compile.value;
+		fn.postln;
+		def = this.wrapWaveFunction(name, fn);
+		postln(def);
+		def.send(Server.default);
 		defs[name.asSymbol] = def;
 	}
 
 	wrapWaveFunction { arg name, fn;
-		switch(fn.numArgs,
-			{ 5 }, { wrapWave(name, fn) },
-			{ 9 }, { wrapWaveNoVca(name, fn) },
-			{ 11 }, { wrapWaveNoVcaNoMix(name, fn) }
+		var nargs = fn.numArgs;
+		postln("num args: " ++ nargs);
+		^switch(nargs,
+			{ 5 }, { this.wrapWave(name, fn) },
+			{ 9 }, { this.wrapWaveNoVca(name, fn) },
+			{ 11 }, { this.wrapWaveNoVcaNoMix(name, fn) }
 		)
 	}
 
 	wrapWave { arg name, fn;
-		SynthDef.new(name.asSymbol, {
-			arg out=0, in,
-			gate, hz, level, pan,
-			atk, dec, sus, rel,
-			mod1, mod2, mod3;
+		^SynthDef.new(name.asSymbol, {
+			arg out=0, in, gate, hz,
+			level=0.1, pan=0,
+			atk=0.1, dec=1, sus=1, rel=2,
+			mod1=0, mod2=0, mod3=0;
 			var aenv, snd;
 			aenv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate);
 			snd = fn.value(hz, in, mod1, mod2, mod3) * aenv;
@@ -144,11 +178,11 @@ Zwaves {
 	}
 
 	wrapWaveNoVca { arg name, fn;
-		SynthDef.new(name.asSymbol, {
-			arg out=0, in,
-			gate, hz, level, pan,
-			atk, dec, sus, rel,
-			mod1, mod2, mod3;
+		^SynthDef.new(name.asSymbol, {
+			arg out=0, in, gate, hz,
+			level=0.1, pan=0,
+			atk=0.1, dec=1, sus=1, rel=2,
+			mod1=0, mod2=0, mod3=0;
 			var snd;
 			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate);
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
@@ -156,11 +190,11 @@ Zwaves {
 	}
 
 	wrapWaveNoVcaNoMix { arg name, fn;
-		SynthDef.new(name.asSymbol, {
-			arg out=0, in,
-			gate, hz, level, pan,
-			atk, dec, sus, rel,
-			mod1, mod2, mod3;
+		^SynthDef.new(name.asSymbol, {
+			arg out=0, in, gate, hz,
+			level=0.1, pan=0,
+			atk=0.1, dec=1, sus=1, rel=2,
+			mod1=0, mod2=0, mod3=0;
 			var snd;
 			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, level, pan);
 			Out.ar(out, snd);
