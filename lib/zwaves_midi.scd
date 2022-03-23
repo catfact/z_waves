@@ -1,4 +1,4 @@
-// prototype voice handling
+// prototype z_waves with midi
 
 Routine {
 
@@ -14,42 +14,20 @@ Routine {
 	s.sync;
 	n.do({ arg i; z.setVoiceDef(i, d) });
 
-	// voice assignment
-	v = ();
-	v.ready = List.fill(n, {arg i; i});
-	v.used = List.new;
-	v.voice = {
-		var steal = false;
-		var x;
-		if (v.ready.size > 0, {
-			postln("no steal");
-			x = v.ready.pop
-		}, {
-			steal = true;
-			postln("stealing...");
-			x = v.used.removeAt(0)
-		});
-		v.used.add(x);
-		[x, steal]
-	};
-	v.done = { arg x; v.ready.addFirst(x); };
 
-	// note->voice map
-	m = Array.newClear(128);
+	v = Zwaves_MidiVoicer.new(n);
+
 	~noteon = { arg vel, num;
 		var slot;
-		['noteon', vel, num].postln;
-		slot = v.voice.value[0];
-		m[num] = slot;
+		//['noteon', vel, num].postln;
+		slot = v.requestSlot(num);
 		z.playVoice(slot, num.midicps, 0.1);
 	};
 
 	~noteoff = { arg vel, num;
 		var slot;
-		['noteoff', vel, num].postln;
-		slot = m[num];
-		v.done.value(num);
-		m[num] = nil;
+		//['noteoff', vel, num].postln;
+		slot = v.releaseNote(num);
 		z.closeVoiceGateBySlot(slot);
 	};
 
@@ -63,3 +41,15 @@ Routine {
 	});
 
 }.play;
+
+/*
+
+v.stealMode = \closest
+v.assignMode = \closest
+
+v.stealMode = \former
+v.assignMode = \former
+
+v.stealMode = \oldest
+v.assignMode = \oldest
+*/

@@ -57,7 +57,7 @@ Zwaves {
 				Array.fill(numVoices, { arg dst;
 					{ arg amp=0;
 						Out.ar(busses[\voice_in][dst].index,
-							InFeedback.ar(busses[\voice_out][src].index, 2) * amp.lag)
+							Mix.new(InFeedback.ar(busses[\voice_out][src].index, 2)) * amp.lag)
 					}.play(groups[\input])
 				});
 			});
@@ -173,17 +173,31 @@ Zwaves {
 	//-------------------------------------------------
 	//--- additional convenience setters
 
-	playVoice { arg slot, hz, level=1.0;
+	playVoice { arg slot, hz, level, pan;
 		var id;
 		postln(["playVoice", slot, hz, level]);
 		id = voiceNodeIds[slot];
-		voiceSynths[id].set(\hz, hz, \level, level);
+		if (hz.notNil, { voiceSynths[id].set(\hz, hz); });
+		if (level.notNil, { voiceSynths[id].set(\level, level); });
+		if (pan.notNil, { voiceSynths[id].set(\pan, pan); });
 		this.openVoiceGateById(id);
 	}
 
 	setVoiceParam { arg slot, key, value;
 		var id = voiceNodeIds[slot];
 		voiceSynths[id].set(key, value);
+	}
+
+	setVoiceFeedbackLevel { arg src, dst, level;
+		patches['voice_voice'][src][dst].set(\level, level);
+	}
+
+	setVoiceInputLevel{ arg voice, level;
+		patches['adc_voice'][voice].set(\level, level);
+	}
+
+	setVoiceOutputLevel { arg voice, level;
+		patches['voice_dac'][voice].set(\level, level);
 	}
 
 	//-------------------------------------------------
@@ -253,4 +267,131 @@ Zwaves {
 			Out.ar(out, snd);
 		})
 	}
+}
+
+
+//--------------
+//-- helper for voice slot assignment
+
+Zwaves_MidiVoicer {
+	var <numVoices;
+	var <readySlots;
+	var <usedSlots;
+	var <numReady;
+	var <numUsed;
+	var <notePerSlot;
+	var <slotPerNote;
+	var <>stealMode;
+	var <>assignMode;
+
+	*new { arg aNumVoices; ^super.new.init(aNumVoices); }
+
+	init { arg aNumVoices; numVoices = aNumVoices;
+		readySlots = LinkedList.series(numVoices);
+		usedSlots = LinkedList.new;
+		numUsed = 0;
+		numReady = numVoices;
+		slotPerNote = Array.fill(128, {arg i; i % numVoices});
+		notePerSlot = Array.fill(numVoices, {60});
+		stealMode = \oldest;
+		assignMode = \oldest;
+	}
+
+	stealSlot {
+		arg note;
+		var slot = switch(stealMode,
+			{\oldest}, {
+				usedSlots[0]
+			},
+			{\newest}, {
+				usedSlots[numVoices-1]
+			},
+			{\closest}, {
+				minIndex(notePerSlot, {arg n; (note-n).abs})
+			},
+			{\former}, {
+				if (slotPerNote[note].notNil, {
+					slotPerNote[note]
+				}, {
+					minIndex(notePerSlot, {arg n; (note-n).abs})
+				});
+			},
+			{\random}, {
+				numVoices.rand;
+			}
+		);
+		^slot
+	}
+
+	assignSlot {
+		arg note;
+		var slot, idx;
+		switch(assignMode,
+			{\oldest}, {
+				slot = readySlots.popFirst;
+			},
+			{\newest}, {
+				slot = readySlots.pop;
+			},
+			{\closest}, {
+				slot = minIndex(notePerSlot, {arg n; (note-n).abs});
+				postln("closest slot: " ++ slot);
+				idx = readySlots.indexOf(slot);
+				postln("closest idx: " ++ idx);
+				if(idx.isNil, {idx = 0});
+				readySlots.removeAt(idx);
+			},
+			{\former}, {
+				slot = if (slotPerNote[note].notNil, {
+					slotPerNote[note]
+				}, {
+					minIndex(notePerSlot, {arg n; (note-n).abs})
+				});
+				postln("former slot: " ++ slot);
+				idx = readySlots.indexOf(slot);
+				postln("former idx: " ++ idx);
+				if(idx.isNil, {idx = 0});
+				readySlots.removeAt(idx);
+			},
+			{\random}, {
+				idx  =readySlots.size.rand;
+				postln("random idx: " ++ idx);
+				if(idx.isNil, {idx = 0});
+				slot = readySlots.removeAt(idx);
+			}
+		);
+		^slot
+	}
+
+	requestSlot { arg note;
+		var slot;
+		if (numReady > 0, {
+			postln("assigning; mode = " ++ assignMode);
+			slot = this.assignSlot(note); // <- also removes from ready list
+			usedSlots.add(slot);
+			numReady = numReady - 1;
+			numUsed = numUsed + 1;
+		}, {
+			postln("stealing; mode = " ++ stealMode);
+			slot = this.stealSlot(note);
+		});
+		slotPerNote[note] = slot;
+		notePerSlot[slot] = note;
+		^slot
+	}
+
+	releaseSlot { arg slot;
+		var idx = usedSlots.indexOf(slot);
+		usedSlots.removeAt(idx);
+		readySlots.add(slot);
+		numUsed = numUsed - 1;
+		numReady = numReady + 1;
+	}
+
+	releaseNote { arg note;
+		var slot = slotPerNote[note];
+		this.releaseSlot(slotPerNote[note])
+		^slot
+	}
+
 }
