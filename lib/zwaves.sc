@@ -91,6 +91,8 @@ Zwaves {
 		patches[\voice_voice].do({ arg arr; arr.do ({ arg p; p.free; }) });
 		busses[\voice_input].do({ arg b; b.free; });
 		busses[\voice_output].do({ arg b; b.free; });
+
+		nodeOffResponder.free;
 	}
 
 	// populate a new, empty slot with a voice synthesis node
@@ -116,6 +118,27 @@ Zwaves {
 		}.play;
 	}
 
+	// replace existing voice in slot
+	replaceVoice { arg slot, def;
+		var id = voiceNodeIds[slot];
+		if(def.isNil, {
+			// TODO: copy the existing one, i guess?
+		});
+
+		switch(voiceNodeStatus[id],
+			{\paused}, {
+				voiceSynths[id].free;
+			},
+			{\playing}, {
+				voiceSynths[id].set(\doneAction, 2);
+				voiceSynths[id].set(\gate, 0);
+			}
+		);
+		voiceSynths[id] = nil;
+		voiceNodeIds[slot] = nil;
+		this.createVoiceSynth(slot, def, voiceSynths[id]);
+	}
+
 	// set the voice definition for a slot
 	// replaces the existing synth assigned to that slot, if any
 	setVoiceDef { arg slot, def;
@@ -123,27 +146,14 @@ Zwaves {
 		if(id.isNil, {
 			this.createVoiceSynth(slot, def);
 		}, {
-			// replace existing voice in slot
-			switch(voiceNodeStatus[id],
-				{\paused}, {
-					voiceNodeIds[slot] = nil;
-					this.createVoiceSynth(slot, def, voiceSynths[id]);
-				},
-				{\playing}, {
-					voiceSynths[id].set(\doneAction, 2);
-					voiceSynths[id].set(\gate, 0);
-					voiceSynths[id] = nil;
-					voiceNodeIds[slot] = nil;
-					this.createVoiceSynth(slot, def, voiceSynths[id]);
-				}
-			);
+			this.replaceVoice(slot, def);
 		});
 	}
 
-	// openVoiceGateBySlot {arg slot;
-	// 	var id = voiceNodeIds[slot];
-	// 	openVoiceGateById(id);
-	// }
+	openVoiceGateBySlot {arg slot;
+		var id = voiceNodeIds[slot];
+		this.openVoiceGateById(id);
+	}
 
 	openVoiceGateById { arg id;
 		voiceSynths[id].set(\gate, 1);
@@ -151,10 +161,10 @@ Zwaves {
 		voiceNodeStatus[id] = \playing;
 	}
 
-/*	closeVoiceGateBySlot { arg slot;
+	closeVoiceGateBySlot { arg slot;
 		var id =voiceNodeIds[slot];
-		closeVoiceGateById(id);
-	}*/
+		this.closeVoiceGateById(id);
+	}
 
 	closeVoiceGateById { arg id;
 		voiceSynths[id].set(\gate, 0);
@@ -164,9 +174,11 @@ Zwaves {
 	//--- additional convenience setters
 
 	playVoice { arg slot, hz, level=1.0;
-		var id = voiceNodeIds[slot];
+		var id;
+		postln(["playVoice", slot, hz, level]);
+		id = voiceNodeIds[slot];
 		voiceSynths[id].set(\hz, hz, \level, level);
-		openVoiceGateById(id);
+		this.openVoiceGateById(id);
 	}
 
 	setVoiceParam { arg slot, key, value;
