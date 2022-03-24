@@ -9,12 +9,24 @@ Zwaves {
 	var <inputs;
 	var <outputs;
 	var <patches;
+	var <modBusses;
+	var <modMap;
 
 	var <voiceSynths;
 	var <voiceNodeIds;
 	var <voiceNodeStatus;
 
 	var <nodeOffResponder;
+
+	classvar modKeys;
+	classvar allParamKeys;
+	classvar numSynthParams;
+
+	*initClass {
+		modKeys = [\mod1, \mod2, \mod3, \mod4, \mod5];
+		allParamKeys = [\hz, \level, \pan] ++ modKeys;
+		numSynthParams = allParamKeys.size;
+	}
 
 	*new { arg aNumVoices = 16, aServer;
 		^super.new.init(aNumVoices, aServer);
@@ -29,11 +41,14 @@ Zwaves {
 		defs = Dictionary.new;
 
 		// collection of groups, indexed by role
-		groups = Dictionary.newFrom([
-			\input, Group.tail(server),
-			\voice, Group.tail(server),
-			\output, Group.tail(server)
-		]);
+		groups = Dictionary.new;
+		groups[\voice] =  Group.tail(server);
+		groups[\output] =  Group.tail(server);
+		// this is counter-intuitive but correct;
+		// we use InFeedback in the voice synths,
+		// so all input synths should come later
+		// (to avoid overwriting each other)
+		groups[\input] =  Group.tail(server);
 
 		// collection of bus arrays, indexed by role
 		busses= Dictionary.newFrom([
@@ -41,24 +56,33 @@ Zwaves {
 			\voice_out, Array.fill(numVoices, { Bus.audio(server, 2) })
 		]);
 
+		// collection of control busses for parameter modulation
+		modBusses = Dictionary.new;
+		modKeys.do({ arg k; modBusses[k] = Bus.control(server, 1); });
+
+		// flags indicating which params are mapped to mod busses for each voice
+		modMap = Array.fill(numVoices, { var m = Dictionary.new;
+			modKeys.do({ arg k; m[k] = false; m });
+		});
+
 		// collection of patch point synth arrays, indexed by role
 		patches = Dictionary.newFrom([
 			\adc_voice, Array.fill(numVoices, { arg slot;
-				{ arg amp=1;
-					Out.ar(busses[\voice_in][slot].index, SoundIn.ar(0) * amp.lag)
+				{ arg level=1, channel=0;
+					Out.ar(busses[\voice_in][slot].index, SoundIn.ar(channel) * level.lag)
 				}.play(groups[\input])
 			});
 			\voice_dac, Array.fill(numVoices, { arg slot;
-				{ arg amp=1;
-					Out.ar(0, In.ar(busses[\voice_out][slot].index, 2) * amp.lag)
+				{ arg level=1;
+					Out.ar(0, In.ar(busses[\voice_out][slot].index, 2) * level.lag)
 				}.play(groups[\output])
 			});
 			\voice_voice, Array.fill(numVoices, { arg src;
 				Array.fill(numVoices, { arg dst;
-					{ arg amp=0;
+					{ arg level=0, pan=0;
 						Out.ar(busses[\voice_in][dst].index,
-							Mix.new(InFeedback.ar(busses[\voice_out][src].index, 2)) * amp.lag)
-					}.play(groups[\input])
+							SelectX.ar(pan, In.ar(busses[\voice_out][src].index, 2)) * level.lag)
+					}.play(groups[\output], addAction:\addToTail)
 				});
 			});
 		]);
@@ -89,54 +113,50 @@ Zwaves {
 		groups[\output].free;
 
 		patches[\voice_voice].do({ arg arr; arr.do ({ arg p; p.free; }) });
-		busses[\voice_input].do({ arg b; b.free; });
-		busses[\voice_output].do({ arg b; b.free; });
+		busses[\voice_in].do({ arg b; b.free; });
+		busses[\voice_out].do({ arg b; b.free; });
 
 		nodeOffResponder.free;
 	}
 
 	// populate a new, empty slot with a voice synthesis node
-	createVoiceSynth { arg slot, def, copySynth=nil;
-		Routine {
-			var synth = Synth.newPaused(def, [
-				\in, busses[\voice_in][slot].index,
-				\out, busses[\voice_out][slot].index
-			], groups[\voice], \addToTail);
-			var id = synth.nodeID;
-			voiceNodeIds[slot] = id;
-			voiceSynths[id] = synth;
+	// optionally, provide a list of parameter values (no keys)
+	createVoiceSynth { arg slot, def, params=nil;
+		var synth = Synth.newPaused(def, [
+			\in, busses[\voice_in][slot].index,
+			\out, busses[\voice_out][slot].index
+		], groups[\voice], \addToTail);
+		var id = synth.nodeID;
+		voiceNodeIds[slot] = id;
+		voiceSynths[id] = synth;
 
-			if (copySynth.notNil, {
-				[\hz, \mod1, \mod2, \mod3].do({ arg k;
-					copySynth.get(k, { arg val;
-						synth.set(k, val);
-					});
-				});
-				server.sync;
+		if (params.notNil, {
+			allParamKeysdo({ arg k, i;
+				synth.set(k, params[i]);
 			});
-			synth.run(true);
-		}.play;
+		});
+		synth.run(true);
 	}
 
 	// replace existing voice in slot
 	replaceVoice { arg slot, def;
 		var id = voiceNodeIds[slot];
-		if(def.isNil, {
-			// TODO: copy the existing one, i guess?
+		voiceSynths[id].getn(0, numSynthParams, {
+			arg params;
+			postln(params);
+			switch(voiceNodeStatus[id],
+				{\paused}, {
+					voiceSynths[id].free;
+				},
+				{\playing}, {
+					voiceSynths[id].set(\doneAction, 2);
+					voiceSynths[id].set(\gate, 0);
+				}
+			);
+			voiceSynths[id] = nil;
+			voiceNodeIds[slot] = nil;
+			this.createVoiceSynth(slot, def, params);
 		});
-
-		switch(voiceNodeStatus[id],
-			{\paused}, {
-				voiceSynths[id].free;
-			},
-			{\playing}, {
-				voiceSynths[id].set(\doneAction, 2);
-				voiceSynths[id].set(\gate, 0);
-			}
-		);
-		voiceSynths[id] = nil;
-		voiceNodeIds[slot] = nil;
-		this.createVoiceSynth(slot, def, voiceSynths[id]);
 	}
 
 	// set the voice definition for a slot
@@ -173,19 +193,25 @@ Zwaves {
 	//-------------------------------------------------
 	//--- additional convenience setters
 
-	playVoice { arg slot, hz, level, pan;
+	// tell a given voice to start playing
+	// optionally set its hz, level, and/or pan parameters
+	playVoice { arg slot, params;
 		var id;
-		postln(["playVoice", slot, hz, level]);
+		postln(["playVoice", params]);
 		id = voiceNodeIds[slot];
-		if (hz.notNil, { voiceSynths[id].set(\hz, hz); });
-		if (level.notNil, { voiceSynths[id].set(\level, level); });
-		if (pan.notNil, { voiceSynths[id].set(\pan, pan); });
+		voiceSynths[id].set(*params);
 		this.openVoiceGateById(id);
 	}
 
+	// set given parameter for given voice index
+	// if index < 0, set for all voices
 	setVoiceParam { arg slot, key, value;
-		var id = voiceNodeIds[slot];
-		voiceSynths[id].set(key, value);
+		if (slot < 0, {
+			voiceSynths.do({ arg synth; synth.set(key, value); });
+		}, {
+			var id = voiceNodeIds[slot];
+			voiceSynths[id].set(key, value);
+		});
 	}
 
 	setVoiceFeedbackLevel { arg src, dst, level;
@@ -225,9 +251,9 @@ Zwaves {
 		var nargs = fn.numArgs;
 		postln("num args: " ++ nargs);
 		^switch(nargs,
-			{ 5 }, { this.wrapWave(name, fn) },
-			{ 10 }, { this.wrapWaveNoVca(name, fn) },
-			{ 12 }, { this.wrapWaveNoVcaNoMix(name, fn) }
+			{ 7 }, { this.wrapWave(name, fn) },
+			{ 12 }, { this.wrapWaveNoVca(name, fn) },
+			{ 14 }, { this.wrapWaveNoVcaNoMix(name, fn) }
 		)
 	}
 
@@ -236,10 +262,11 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0;
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
 			var aenv, snd;
 			aenv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
-			snd = fn.value(hz, in, mod1, mod2, mod3) * aenv;
+			snd = fn.value(hz, InFeedback.ar(in),
+				mod1, mod2, mod3, mod4, mod5) * aenv;
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
 		})
 	}
@@ -249,9 +276,12 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0;
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
 			var snd;
-			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, doneAction);
+			snd = fn.value(hz, InFeedback.ar(in),
+				mod1, mod2, mod3, mod4, mod5,
+				atk, dec, sus, rel,
+				gate, doneAction);
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
 		})
 	}
@@ -261,9 +291,12 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0;
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
 			var snd;
-			snd = fn.value(hz, in, mod1, mod2, mod3, atk, dec, sus, rel, gate, doneAction, level, pan);
+			snd = fn.value(hz, InFeedback.ar(in),
+				mod1, mod2, mod3, mod4, mod5,
+				atk, dec, sus, rel,
+				gate, doneAction, level, pan);
 			Out.ar(out, snd);
 		})
 	}
@@ -292,9 +325,9 @@ Zwaves_MidiVoicer {
 		numUsed = 0;
 		numReady = numVoices;
 		slotPerNote = Array.fill(128, {arg i; i % numVoices});
-		notePerSlot = Array.fill(numVoices, {60});
-		stealMode = \oldest;
-		assignMode = \oldest;
+		notePerSlot = Array.series(numVoices, 48);
+		stealMode = \former;
+		assignMode = \former;
 	}
 
 	stealSlot {
@@ -310,11 +343,7 @@ Zwaves_MidiVoicer {
 				minIndex(notePerSlot, {arg n; (note-n).abs})
 			},
 			{\former}, {
-				if (slotPerNote[note].notNil, {
-					slotPerNote[note]
-				}, {
-					minIndex(notePerSlot, {arg n; (note-n).abs})
-				});
+				slotPerNote[note]
 			},
 			{\random}, {
 				numVoices.rand;
@@ -335,20 +364,20 @@ Zwaves_MidiVoicer {
 			},
 			{\closest}, {
 				slot = minIndex(notePerSlot, {arg n; (note-n).abs});
-				postln("closest slot: " ++ slot);
 				idx = readySlots.indexOf(slot);
+				postln("closest slot: " ++ slot);
 				postln("closest idx: " ++ idx);
 				if(idx.isNil, {idx = 0});
 				readySlots.removeAt(idx);
 			},
 			{\former}, {
-				slot = if (slotPerNote[note].notNil, {
-					slotPerNote[note]
-				}, {
-					minIndex(notePerSlot, {arg n; (note-n).abs})
+				slot = slotPerNote[note];
+				idx = readySlots.indexOf(slot);
+				if (idx.isNil, {
+					idx = minIndex(readySlots, {arg sl; (notePerSlot[sl]-note).abs});
+					slot =readySlots[idx];
 				});
 				postln("former slot: " ++ slot);
-				idx = readySlots.indexOf(slot);
 				postln("former idx: " ++ idx);
 				if(idx.isNil, {idx = 0});
 				readySlots.removeAt(idx);

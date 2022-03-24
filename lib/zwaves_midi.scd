@@ -1,4 +1,4 @@
-// prototype z_waves with midi
+// prototype z_waves with midiå
 
 Routine {
 
@@ -17,11 +17,14 @@ Routine {
 
 	v = Zwaves_MidiVoicer.new(n);
 
+	~defaults = [\level:0.1, \atk, 2, \rel, 1, \dec, 2.0, \sus, 0.5];
+
 	~noteon = { arg vel, num;
-		var slot;
+		var slot, mod;
 		//['noteon', vel, num].postln;
 		slot = v.requestSlot(num);
-		z.playVoice(slot, num.midicps, 0.1);
+		mod = vel.linlin(20, 127, 0, 1);
+		z.playVoice(slot, [\hz: num.midicps, \mod1, mod] ++ ~defaults);
 	};
 
 	~noteoff = { arg vel, num;
@@ -40,10 +43,28 @@ Routine {
 		~noteoff.value(vel, num);
 	});
 
+
+	n.do({ arg i;
+		var pan = i.linlin(0, n-1, -1, 1);
+		postln(pan);
+		z.setVoiceParam(i, "pan",pan);
+	});
+
+	n.do({ arg i;
+		z.setVoiceParam(i, \mod1, 1.0.rand);
+		z.setVoiceParam(i, \mod2, 0.2);
+		z.setVoiceParam(i, \mod3, 0.5);
+		z.setVoiceParam(i, \mod4, 0.8);
+		z.setVoiceParam(i, \mod5, 5);
+	});
+
+	n.do({ arg i;
+		z.setVoiceFeedbackLevel(i, (i+1)%8, 1);
+	});
+
 }.play;
 
 /*
-
 v.stealMode = \closest
 v.assignMode = \closest
 

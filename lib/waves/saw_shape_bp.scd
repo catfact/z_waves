@@ -1,8 +1,8 @@
 
 {
-	arg hz, in, mod1, mod2, mod3;
+	arg hz, in, mod1, mod2, mod3, mod4, mod5;
 	var shape = mod1.linexp(0, 1, 0.999, 0.001);
-	var fc = hz * (2 ** (mod2 + 1));
+	var fc = hz * (2**mod2);
 	var rq = mod3.linexp(0, 1, 2, 0.01);
 	var snd, asnd;
 	fc = Lag.kr(fc, 0.2);
