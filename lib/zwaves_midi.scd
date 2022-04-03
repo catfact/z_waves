@@ -1,4 +1,4 @@
-// prototype z_waves with midiå
+// prototype z_waves with midi
 
 Routine {
 
@@ -53,13 +53,14 @@ Routine {
 	n.do({ arg i;
 		z.setVoiceParam(i, \mod1, 1.0.rand);
 		z.setVoiceParam(i, \mod2, 0.2);
-		z.setVoiceParam(i, \mod3, 0.5);
-		z.setVoiceParam(i, \mod4, 0.8);
-		z.setVoiceParam(i, \mod5, 5);
+		z.setVoiceParam(i, \mod3, 0.25);
+		z.setVoiceParam(i, \mod4, 0.7);
+		z.setVoiceParam(i, \mod5, 0.2);
 	});
 
 	n.do({ arg i;
-		z.setVoiceFeedbackLevel(i, (i+1)%8, 1);
+		z.setVoiceFeedbackLevel(i, (i+3)%8, 1);
+		z.setVoiceFeedbackLevel(i, (i+5)%8, 1);
 	});
 
 }.play;

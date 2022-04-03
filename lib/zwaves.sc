@@ -18,13 +18,15 @@ Zwaves {
 
 	var <nodeOffResponder;
 
-	classvar modKeys;
-	classvar allParamKeys;
-	classvar numSynthParams;
+	classvar <modKeys;
+	classvar <modEnvKeys;
+	classvar <allParamKeys;
+	classvar <numSynthParams;
 
 	*initClass {
 		modKeys = [\mod1, \mod2, \mod3, \mod4, \mod5];
-		allParamKeys = [\hz, \level, \pan] ++ modKeys;
+		modEnvKeys = [\modEnv1, \modEnv2, \modEnv3, \modEnv4, \modEnv5];
+		allParamKeys = [\hz, \level, \pan, \atk, \dec, \sus, \rel] ++ modKeys ++ modEnvKeys;
 		numSynthParams = allParamKeys.size;
 	}
 
@@ -159,17 +161,6 @@ Zwaves {
 		});
 	}
 
-	// set the voice definition for a slot
-	// replaces the existing synth assigned to that slot, if any
-	setVoiceDef { arg slot, def;
-		var id = voiceNodeIds[slot];
-		if(id.isNil, {
-			this.createVoiceSynth(slot, def);
-		}, {
-			this.replaceVoice(slot, def);
-		});
-	}
-
 	openVoiceGateBySlot {arg slot;
 		var id = voiceNodeIds[slot];
 		this.openVoiceGateById(id);
@@ -190,17 +181,60 @@ Zwaves {
 		voiceSynths[id].set(\gate, 0);
 	}
 
+
+
 	//-------------------------------------------------
-	//--- additional convenience setters
+	//--- public API
+
+	// set the voice definition for a slot
+	// replaces the existing synth assigned to that slot, if any
+	setVoiceDef { arg slot, def;
+		var id = voiceNodeIds[slot];
+		if(id.isNil, {
+			this.createVoiceSynth(slot, def);
+		}, {
+			this.replaceVoice(slot, def);
+		});
+	}
 
 	// tell a given voice to start playing
 	// optionally set its hz, level, and/or pan parameters
-	playVoice { arg slot, params;
+	playVoice { arg slot, params, map;
 		var id;
 		postln(["playVoice", params]);
 		id = voiceNodeIds[slot];
-		voiceSynths[id].set(*params);
+		if (params.notNil, {
+			voiceSynths[id].set(*params);
+		});
+		if(map.notNil, {
+			map.keys.do({ arg key;
+				setVoiceModMap(slot, key, map[key]);
+			})
+		});
 		this.openVoiceGateById(id);
+	}
+
+	// set the modulation bus mapping for given voice, given mod key
+	// value should be a Boolean
+	setVoiceModMap { arg slot, key, val;
+		var synth;
+		if (val, {
+			if (modMap[slot][key].not, {
+				synth = voiceSynths[slot];
+				if (synth.notNil, {
+					synth.map(key, modBusses[key].index);
+				});
+				modMap[slot][key] = true;
+			});
+		}, {
+			if (modMap[slot][key], {
+				synth = voiceSynths[slot];
+				if (synth.notNil, {
+					synth.unmap(key);
+				});
+				modMap[slot][key] = false;
+			});
+		});
 	}
 
 	// set given parameter for given voice index
@@ -262,9 +296,17 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
-			var aenv, snd;
-			aenv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
+			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
+			var env, aenv, kenv, snd;
+			env = Env.adsr(atk, dec, sus, rel);
+			aenv = EnvGen.ar(env, gate, doneAction:doneAction);
+			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			mod1 = mod1.blend(kenv, modEnv1);
+			mod2 = mod2.blend(kenv, modEnv2);
+			mod3 = mod2.blend(kenv, modEnv3);
+			mod4 = mod2.blend(kenv, modEnv4);
+			mod5 = mod2.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5) * aenv;
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
@@ -276,8 +318,16 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
-			var snd;
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
+			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
+			var env, kenv, snd;
+			env = Env.adsr(atk, dec, sus, rel);
+			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			mod1 = mod1.blend(kenv, modEnv1);
+			mod2 = mod2.blend(kenv, modEnv2);
+			mod3 = mod2.blend(kenv, modEnv3);
+			mod4 = mod2.blend(kenv, modEnv4);
+			mod5 = mod2.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5,
 				atk, dec, sus, rel,
@@ -291,8 +341,16 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
-			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0;
-			var snd;
+			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
+			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
+			var env, kenv, snd;
+			env = Env.adsr(atk, dec, sus, rel);
+			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			mod1 = mod1.blend(kenv, modEnv1);
+			mod2 = mod2.blend(kenv, modEnv2);
+			mod3 = mod2.blend(kenv, modEnv3);
+			mod4 = mod2.blend(kenv, modEnv4);
+			mod5 = mod2.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5,
 				atk, dec, sus, rel,
@@ -374,8 +432,10 @@ Zwaves_MidiVoicer {
 				slot = slotPerNote[note];
 				idx = readySlots.indexOf(slot);
 				if (idx.isNil, {
+					// the previously assigned slot isn't available;
+					// fall back on "closest"
 					idx = minIndex(readySlots, {arg sl; (notePerSlot[sl]-note).abs});
-					slot =readySlots[idx];
+					slot = readySlots[idx];
 				});
 				postln("former slot: " ++ slot);
 				postln("former idx: " ++ idx);
@@ -383,7 +443,7 @@ Zwaves_MidiVoicer {
 				readySlots.removeAt(idx);
 			},
 			{\random}, {
-				idx  =readySlots.size.rand;
+				idx = numReady.rand;
 				postln("random idx: " ++ idx);
 				if(idx.isNil, {idx = 0});
 				slot = readySlots.removeAt(idx);
@@ -419,8 +479,9 @@ Zwaves_MidiVoicer {
 
 	releaseNote { arg note;
 		var slot = slotPerNote[note];
-		this.releaseSlot(slotPerNote[note])
+		if (slot.notNil, {
+			this.releaseSlot(slot);
+		});
 		^slot
 	}
-
 }
