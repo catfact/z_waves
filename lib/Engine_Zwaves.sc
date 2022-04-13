@@ -8,8 +8,8 @@ Engine_Zwaves : CroneEngine {
 
     alloc {
 		zw = Zwaves.new(numVoices);
-        zw.loadAllDefs("/home/we/dust/code/z.waves/lib/waves");
-        zw.loadAllDefs("/home/we/dust/data/z.waves/waves");
+        zw.loadAllWaves("/home/we/dust/code/z_waves/lib/waves");
+        zw.loadAllWaves("/home/we/dust/data/z_waves/waves");
 
 		zv = Zwaves_MidiVoicer.new(numVoices);
 
@@ -25,14 +25,21 @@ Engine_Zwaves : CroneEngine {
 		this.addCommand(\play_note_hz, "if", { arg msg;
 			var note = msg[1];
 			var hz = msg[2];
-			var slot = zv.requestSlot(note);
+			var slot;
+			postln("zwaves: play_note_hz " ++ note ++ ", "++hz);
+			slot = zv.requestSlot(note);
+			postln("slot: "++slot);
 			zw.playVoice(slot, [\hz, hz]);
 		});
 
         // release a note using the voice allocator
         this.addCommand(\release_note, "i", {arg msg;
             var note = msg[1];
-            var slot = zv.releaseNote(note);
+			var hz = msg[2];
+			var slot;
+			postln("zwaves: release_note " ++ note);
+            slot = zv.releaseNote(note);
+			postln("slot: "++slot);
 		    zw.closeVoiceGateBySlot(slot);
         });
 
