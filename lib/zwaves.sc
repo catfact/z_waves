@@ -26,7 +26,9 @@ Zwaves {
 	*initClass {
 		modKeys = [\mod1, \mod2, \mod3, \mod4, \mod5];
 		modEnvKeys = [\modEnv1, \modEnv2, \modEnv3, \modEnv4, \modEnv5];
-		allParamKeys = [\hz, \level, \pan, \atk, \dec, \sus, \rel] ++ modKeys ++ modEnvKeys;
+		allParamKeys = [\hz, \level, \pan, 
+		\atk, \dec, \sus, \rel,
+		\modAtk, \modDec, \modSus, \modRel] ++ modKeys ++ modEnvKeys;
 		numSynthParams = allParamKeys.size;
 	}
 
@@ -296,17 +298,18 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
+			modAtk=0.1, modDec=1, modSus=1, modRel=2,
 			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
 			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
 			var env, aenv, kenv, snd;
 			env = Env.adsr(atk, dec, sus, rel);
 			aenv = EnvGen.ar(env, gate, doneAction:doneAction);
-			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			kenv = EnvGen.kr(Env.adsr(modAtk, modDec, modSus, modRel), gate, doneAction:0);
 			mod1 = mod1.blend(kenv, modEnv1);
 			mod2 = mod2.blend(kenv, modEnv2);
-			mod3 = mod2.blend(kenv, modEnv3);
-			mod4 = mod2.blend(kenv, modEnv4);
-			mod5 = mod2.blend(kenv, modEnv5);
+			mod3 = mod3.blend(kenv, modEnv3);
+			mod4 = mod4.blend(kenv, modEnv4);
+			mod5 = mod5.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5) * aenv;
 			Out.ar(out, Lag2.kr(level) * Pan2.ar(snd, Lag2.kr(pan)));
@@ -318,16 +321,17 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
+			modAtk=0.1, modDec=1, modSus=1, modRel=2,
 			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
 			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
 			var env, kenv, snd;
 			env = Env.adsr(atk, dec, sus, rel);
-			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			kenv = EnvGen.kr(Env.adsr(modAtk, modDec, modSus, modRel), gate, doneAction:0);
 			mod1 = mod1.blend(kenv, modEnv1);
 			mod2 = mod2.blend(kenv, modEnv2);
-			mod3 = mod2.blend(kenv, modEnv3);
-			mod4 = mod2.blend(kenv, modEnv4);
-			mod5 = mod2.blend(kenv, modEnv5);
+			mod3 = mod3.blend(kenv, modEnv3);
+			mod4 = mod4.blend(kenv, modEnv4);
+			mod5 = mod5.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5,
 				atk, dec, sus, rel,
@@ -341,16 +345,17 @@ Zwaves {
 			arg out=0, in, gate, hz, doneAction=1,
 			level=0.1, pan=0,
 			atk=0.1, dec=1, sus=1, rel=2,
+			modAtk=0.1, modDec=1, modSus=1, modRel=2,
 			mod1=0, mod2=0, mod3=0, mod4=0, mod5=0,
 			modEnv1=0, modEnv2=0, modEnv3=0, modEnv4=0, modEnv5=0;
 			var env, kenv, snd;
 			env = Env.adsr(atk, dec, sus, rel);
-			kenv = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:doneAction);
+			kenv = EnvGen.kr(Env.adsr(modAtk, modDec, modSus, modRel), gate, doneAction:0);
 			mod1 = mod1.blend(kenv, modEnv1);
 			mod2 = mod2.blend(kenv, modEnv2);
-			mod3 = mod2.blend(kenv, modEnv3);
-			mod4 = mod2.blend(kenv, modEnv4);
-			mod5 = mod2.blend(kenv, modEnv5);
+			mod3 = mod3.blend(kenv, modEnv3);
+			mod4 = mod4.blend(kenv, modEnv4);
+			mod5 = mod5.blend(kenv, modEnv5);
 			snd = fn.value(hz, InFeedback.ar(in),
 				mod1, mod2, mod3, mod4, mod5,
 				atk, dec, sus, rel,

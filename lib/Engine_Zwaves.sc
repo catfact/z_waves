@@ -83,6 +83,10 @@ Engine_Zwaves : CroneEngine {
 			zw.setVoiceOutputLevel(slot, val);
 		});
 
+		this.addCommand(\all_notes_off, "", {
+			
+		})
+
     }
 
 
