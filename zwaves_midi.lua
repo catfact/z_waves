@@ -3,11 +3,10 @@ local zw = include 'lib/zwaves'
 
 engine.name = 'Zwaves'
 
-nvoices = 8
+nvoices = zw.num_voices
 
 local handle_midi_data = function(data)
     local com = data[1] & 0xf0
-    -- local ch = (data[1] & 0x0f) + 1
     local fn = nil
     if com == 0x80 then 
         print('noteoff', data[2], data[3])
@@ -25,11 +24,6 @@ init = function()
 
     ---- engine params
     zw.add_params()
-
-    -- --- for now...
-    -- for voice=1,8 do
-    --     engine.voice_wave(voice, 'sine_fb_ring')
-    -- end
     
     print('setting default params...')
     params:default()
@@ -38,7 +32,6 @@ init = function()
     m = midi.connect()
     m.event = handle_midi_data
     
-
     print('init done')
 end
 

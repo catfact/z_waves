@@ -26,7 +26,7 @@ Engine_Zwaves : CroneEngine {
 			var note = msg[1];
 			var hz = msg[2];
 			var slot;
-			postln("zwaves: play_note_hz " ++ note ++ ", "++hz);
+			postln("zwaves: play_note_hz " ++ note ++ ", "++hz++" ("++hz.cpsmidi++")");
 			slot = zv.requestSlot(note);
 			postln("slot: "++slot);
 			zw.playVoice(slot, [\hz, hz]);
